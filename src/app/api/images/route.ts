@@ -75,12 +75,22 @@ export async function DELETE(request: Request) {
         }
         const image: ImageMetadata = list[idx];
 
-        // Xóa file vật lý theo image.url (linh hoạt với thư mục public/*)
+        // Xóa file vật lý theo image.url (linh hoạt với thư mục public/*) và có thể có basePath
         const fs = require('fs').promises;
         const path = require('path');
         try {
-            const relativeFromUrl = typeof image.url === 'string' ? image.url.replace(/^\//, '') : '';
-            const filePath = path.join(process.cwd(), 'public', relativeFromUrl);
+            const rawUrl = typeof image.url === 'string' ? image.url : '';
+            // Loại bỏ origin nếu có
+            const withoutOrigin = rawUrl.replace(/^https?:\/\/[^/]+/, '');
+            // Bỏ leading slash
+            let normalized = withoutOrigin.replace(/^\/+/, '');
+            // Nếu có basePath (NEXT_PUBLIC_BASE_PATH/BASE_PATH), loại bỏ nó ở đầu để map về thư mục public thực
+            const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || process.env.BASE_PATH || '').trim();
+            const normalizedBasePath = basePath && basePath !== '/' ? `${basePath.replace(/^\/+|\/+$/g, '')}/` : '';
+            if (normalizedBasePath && normalized.startsWith(normalizedBasePath)) {
+                normalized = normalized.slice(normalizedBasePath.length);
+            }
+            const filePath = path.join(process.cwd(), 'public', normalized);
             try {
                 await fs.unlink(filePath);
             } catch (err) {

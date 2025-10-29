@@ -94,7 +94,10 @@ export async function POST(request: Request) {
             const filePath = path.join(uploadsDir, uuidFileName);
             await writeFile(filePath, buffer);
 
-            const url = `/uploads/${uuidFileName}`;
+            // Tạo URL trả về, có hỗ trợ basePath nếu app chạy dưới subpath
+            const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || process.env.BASE_PATH || '').trim();
+            const normalizedBasePath = basePath && basePath !== '/' ? `/${basePath.replace(/^\/+|\/+$/g, '')}` : '';
+            const url = `${normalizedBasePath}/uploads/${uuidFileName}`;
             const imageId = uuidv4();
             const imageMetadata: ImageMetadata = {
                 id: imageId,
