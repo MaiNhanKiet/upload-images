@@ -8,10 +8,20 @@ const basePath = cleaned ? `/${cleaned}` : undefined;
 
 const nextConfig: NextConfig = {
   basePath,
-  // Tránh redirect thừa khi có/không có dấu '/'
   skipTrailingSlashRedirect: true,
-  // Đảm bảo tracing tốt khi đóng gói docker
-  outputFileTracing: true,
+  async rewrites() {
+    // Cho phép truy cập /uploads/* ngay cả khi app chạy dưới basePath
+    if (basePath) {
+      return [
+        {
+          source: "/uploads/:path*",
+          destination: `${basePath}/uploads/:path*`,
+          basePath: false,
+        },
+      ];
+    }
+    return [];
+  },
 };
 
 export default nextConfig;
