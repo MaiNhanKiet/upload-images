@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 import path from "path";
-import sharp from "sharp";
 import { verifyToken } from "@/lib/auth";
 import redisClient from "@/lib/redis";
-import { stat } from "fs/promises";
+import { stat, rename } from "fs/promises";
 import { safeParse } from "@/lib/utils";
 import { resolveImageFilePathFromUrl, type ImageMetadata } from "@/lib/images";
 
@@ -72,8 +71,25 @@ export async function POST(
       );
     }
 
+    // Resize: dynamically import sharp (optional dependency) so the route
+    // doesn't crash at module load time when sharp isn't installed.
+    let sharpLib: unknown = null;
+    try {
+      const mod = await import("sharp");
+      // Prefer safe unknown cast to avoid 'no-explicit-any' lint errors
+      sharpLib = (mod as unknown as { default?: unknown }).default || mod;
+    } catch (e) {
+      console.error("Sharp not available:", String(e));
+      return NextResponse.json(
+        { error: "Resize requires 'sharp' package. Install it (npm i sharp)" },
+        { status: 501 }
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sharpAny = sharpLib as any;
     // Resize với sharp, giữ chất lượng tốt
-    let pipeline = sharp(filePath).rotate();
+    let pipeline = sharpAny(filePath).rotate();
     pipeline = pipeline.resize({
       width: w || undefined,
       height: h || undefined,
@@ -91,7 +107,21 @@ export async function POST(
       });
     }
 
-    await pipeline.toFile(filePath);
+    // Sharp does not allow using the same file as input and output. Write to a
+    // temporary file and then atomically replace the original file.
+    const tmpPath = `${filePath}.tmp-${Date.now()}`;
+    try {
+      await pipeline.toFile(tmpPath);
+      await rename(tmpPath, filePath);
+    } catch (e) {
+      // Clean up temp file on error
+      try {
+        await rename(tmpPath, filePath);
+      } catch {
+        // ignore
+      }
+      throw e;
+    }
 
     // Cập nhật size mới trong metadata trong list
     try {

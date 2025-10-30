@@ -1,121 +1,138 @@
-## Hệ thống Upload Ảnh
+# Image Upload Service
 
-Phiên bản này đã thay đổi cách lưu ảnh: file nhị phân được lưu ngoài thư mục `public` (để giữ an toàn và khả năng kiểm soát), dưới `storage/uploads-images`. Ảnh được phục vụ qua API: `/api/uploads-images/[filename]`.
+Hệ thống upload ảnh self-hosted: nhận ảnh từ client, lưu file vào `storage/uploads-images/`, lưu metadata lên Redis, và phục vụ ảnh qua API `GET /api/uploads-images/[filename]`.
 
-### 1) Công nghệ chính
+## 🧭 1. Giới thiệu (Overview)
 
-- Next.js 16 (App Router)
-- React 19, TypeScript
-- Redis (lưu metadata ảnh và user)
-- Tailwind CSS + các component UI (shadcn)
-- Sharp (tùy chọn) để resize ảnh phía server
+Mục tiêu: cho phép upload, lưu trữ, trả về URL công khai và quản lý metadata ảnh. Dự án dùng Next.js (App Router), Node.js, và Redis cho metadata — phù hợp để tích hợp vào nền tảng khác hoặc chạy độc lập.
 
-### 2) Yêu cầu môi trường
+## ⚙️ 2. Kiến trúc tổng quan (Architecture)
+
+Luồng xử lý:
+
+1. Client gửi `multipart/form-data` tới `POST /api/upload`.
+2. Server validate file (MIME + size) → sinh tên duy nhất → lưu file vào `storage/uploads-images/`.
+3. Lưu metadata vào Redis (ví dụ `images:{email}`).
+4. Trả về JSON chứa `url` (ví dụ `/api/uploads-images/<filename>`) và metadata.
+
+Mermaid:
+
+```
+graph TD
+  A[Client] -->|POST /api/upload| B[Next.js API]
+  B --> C[Storage (storage/uploads-images)]
+  B --> R[Redis (metadata)]
+  C --> D[Return URL to Client]
+```
+
+## 🧩 3. Tính năng chính (Features)
+
+- [x] Upload ảnh (multipart/form-data)
+- [x] Phục vụ ảnh qua API `GET /api/uploads-images/[filename]`
+- [x] Lưu file vào `storage/uploads-images/` (không lưu trực tiếp vào `public`)
+- [x] Lưu metadata vào Redis (`images:{email}`)
+- [x] Kiểm tra định dạng hợp lệ (.jpg/.jpeg, .png, .webp, .svg)
+- [x] Giới hạn dung lượng upload (configurable)
+      **ADMIN:**
+- [x] Xoá file & metadata qua API
+- [x] Resize / thumbnails (endpoint có sẵn nếu `sharp` được cài)
+- [x] Upload nhiều file cùng lúc
+
+## 🚀 4. Cài đặt và chạy (Setup & Run)
+
+Yêu cầu nhanh:
 
 - Node.js >= 18
-- Redis server đang chạy và cho phép kết nối từ ứng dụng
-- Biến môi trường tùy chọn:
-  - `JWT_SECRET` – nếu không đặt, giá trị mặc định là `your-secret-key`
+- Redis server (chạy local hoặc remote)
 
-Redis connection được cấu hình tại `src/lib/redis.ts`. Điều chỉnh file này nếu môi trường của bạn khác.
-
-### 3) Cài đặt và chạy
+1. Clone & cài dependencies:
 
 ```bash
-cd web
+git clone https://github.com/MaiNhanKiet/upload-images.git
+cd upload-images/web
 npm install
-# (Tùy chọn) cài sharp để dùng tính năng resize ảnh
-npm install sharp
-
-npm run dev
-# Truy cập: http://localhost:3000
 ```
 
-Tài khoản admin mặc định (seed khi lần đầu kết nối Redis):
+2. Tạo file `.env` (hoặc copy từ `.env.example` nếu có) với biến tối thiểu:
+
+```
+PORT=3000
+UPLOAD_PATH=./storage/uploads-images
+MAX_FILE_SIZE=5242880        # 5MB
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=your-strong-secret
+```
+
+3. Dev / Build / Start:
+
+```bash
+# Dev
+npm run dev
+
+# Build + Start (production)
+npm run build
+npm run start
+```
+
+Mặc định ứng dụng chạy tại http://localhost:3000
+
+> Quick dev credentials (seed):
 
 - Email: `mana@gmail.com`
-- Mật khẩu: `123456`
+- Password: `123456`
 
-### 4) Thiết kế lưu trữ ảnh (quan trọng)
+## 🔌 5. API Endpoints (tổng quan)
 
-- File nhị phân ảnh được lưu tại: `storage/uploads-images/<uuid>.<ext>` (không còn lưu trực tiếp trong `public`).
-- Ảnh được truy cập công khai thông qua API: `GET /api/uploads-images/<filename>` (route đã được thêm). Route này trả nội dung ảnh với header Content-Type, Content-Length và Cache-Control phù hợp.
-- Metadata ảnh vẫn lưu trong Redis (LIST `images:{email}`), trường `url` trong metadata có thể là:
-  - `/api/uploads-images/<filename>` (mới, khuyến nghị)
-  - legacy `/uploads/<filename>` hoặc `/uploads-images/<filename>` (vẫn được hỗ trợ bởi resolver nội bộ để xóa/resize)
+All API trả JSON (trừ route phục vụ file). Một số route chính:
 
-Lý do: lưu ngoài `public` cho phép kiểm soát auth/transform trước khi trả file (giống Cloudinary self-hosted).
+- POST /api/auth/register — Đăng ký
+- POST /api/auth/login — Đăng nhập (trả JWT)
+- POST /api/upload — Upload file (multipart/form-data)
+  - Field: `file` (1 file) — trả về: `{ url, name, size, type }` (url thường là `/api/uploads-images/<filename>`)
+- GET /api/images?page=&limit= — Lấy danh sách ảnh của user (metadata từ Redis)
+- DELETE /api/images?id= — Xoá ảnh (metadata + file storage)
+- GET /api/uploads-images/[filename] — Phục vụ file ảnh từ `storage/uploads-images/`
 
-### 5) API chính
+Admin routes (cần auth & role):
 
-Tất cả endpoint trả JSON. Yêu cầu header `Authorization: Bearer <token>` trừ các endpoint auth.
+- GET/POST/PUT/DELETE /api/admin/users
+- GET/PUT/DELETE /api/admin/images
+- POST /api/admin/images/[id]/resize — Resize (dùng `sharp` nếu cài sẵn)
 
-- Auth
-
-  - `POST /api/auth/register` – đăng ký user
-  - `POST /api/auth/login` – đăng nhập, trả token
-
-- Upload & Ảnh của user
-
-  - `POST /api/upload` – upload file(s)
-    - User thường upload 1 file; Admin có thể upload nhiều file.
-    - Định dạng: png, jpg/jpeg, svg
-    - Sau upload, server lưu file vào `storage/uploads-images` và trả `url` dưới dạng `/api/uploads-images/<filename>`.
-  - `GET /api/images?page=&limit=` – danh sách ảnh của user (từ Redis key `images:{email}`)
-  - `DELETE /api/images?id=` – xóa 1 ảnh của chính user (metadata + file trên storage)
-
-- Image serving (mới)
-
-  - `GET /api/uploads-images/[filename]` – trả file ảnh từ `storage/uploads-images` (Content-Type, Cache-Control set sẵn).
-
-- Admin Users
-
-  - `GET /api/admin/users`, `POST /api/admin/users`, `PUT /api/admin/users/[id]`, `DELETE /api/admin/users/[id]` — tương tự như trước, nhưng xóa user giờ sẽ xóa ảnh từ `storage/uploads-images`.
-
-- Admin Images
-  - `GET /api/admin/images` – duyệt tất cả `images:*`
-  - `PUT /api/admin/images/[id]` – chỉnh metadata / chuyển owner
-  - `DELETE /api/admin/images/[id]` – xóa metadata + file (từ storage)
-  - `POST /api/admin/images/[id]/resize` – resize ảnh (sử dụng sharp), hoạt động trên file trong `storage` (không còn phụ thuộc vào `public`)
-
-### 6) Dữ liệu trên Redis
-
-- `user_list`: LIST các user (mỗi phần tử JSON `{ id, email, password, role, createdAt, storageMb? }`).
-- `images:{email}`: LIST metadata ảnh: `{ id, userId, originalName, fileName, url, size, type, uploadedAt }`.
-- Lưu ý: metadata cũ có thể chứa URL dạng `/uploads/...`; dự án có helper `resolveImageFilePathFromUrl` để hỗ trợ ánh xạ các dạng URL legacy sang `storage` nên không bắt buộc phải cập nhật metadata ngay.
-
-### 7) Kiểm tra & lint
-
-- TypeScript: `npx tsc --noEmit`
-- ESLint: `npm run lint`
-- Chạy dev: `npm run dev`
-
-Nếu muốn chuẩn hoá metadata (chuyển tất cả `url` sang `/api/uploads-images/<filename>`), tôi có thể cung cấp script update Redis an toàn — báo tôi nếu muốn thực hiện.
-
-### 8) Lưu ý vận hành
-
-- Bật `JWT_SECRET` mạnh trong production.
-- `sharp` là optional dependency; nếu không cài, các route resize sẽ lỗi.
-- Việc chuyển file ra khỏi `public` giúp kiểm soát truy cập và áp dụng caching/transform khi phát hành.
-
-### 9) Lệnh nhanh
+Ví dụ curl (upload):
 
 ```bash
-# Phát triển
-npm run dev
-
-# Lint/typecheck
-npm run lint
-npx tsc --noEmit
-
-# Build & start
-npm run build
-npm start
+curl -F "file=@/path/to/image.jpg" http://localhost:3000/api/upload
 ```
 
-### 10) Hỗ trợ
+## 🧱 6. Cấu trúc thư mục (folder structure)
 
-Nếu gặp lỗi liên quan Redis keys cũ, xem log khi khởi động (có dòng "Redis cleanup" nếu ứng dụng dọn legacy keys). Nếu cần, tôi có thể:
+Tập trung những file quan trọng:
 
-- Viết script chuẩn hoá metadata trong Redis (chuyển URL → `/api/uploads-images/...`).
-- Thêm route redirect legacy `/uploads/<file>` → `/api/uploads-images/<file>` nếu bạn muốn giữ các đường link public cũ.
+```
+web/
+├─ public/                   # static (UI assets)
+├─ storage/
+│  └─ uploads-images/        # nơi lưu file nhị phân (production-persistent)
+├─ src/
+│  ├─ app/
+│  │  ├─ api/
+│  │  │  ├─ upload/route.ts           # POST /api/upload
+│  │  │  ├─ uploads-images/[filename]/route.ts  # GET /api/uploads-images/:filename
+│  │  │  └─ auth/, admin/, images/    # các route khác
+│  └─ lib/
+│     ├─ redis.ts                    # cấu hình Redis
+│     ├─ images.ts                   # helper xử lý file
+│     └─ auth.ts
+├─ package.json
+└─ README.md
+```
+
+## 🔐 7. Bảo mật & Lưu ý (Security)
+
+- Không cho phép upload file thực thi (.exe, .php, .js). Validate extension + MIME type.
+- Giới hạn kích thước upload (`MAX_FILE_SIZE`).
+- Sanitize & generate tên file duy nhất (timestamp + uuid).
+- Không dùng filesystem local cho storage nếu deploy serverless — hãy dùng S3/Cloudinary.
+- Bảo vệ các route quản trị bằng JWT + role checks.
+- Dọn dẹp storage (cron) để xóa file cũ/unused.
