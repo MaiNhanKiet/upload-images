@@ -1,6 +1,9 @@
-## Hệ thống Upload Ảnh – Hướng dẫn triển khai và vận hành
+## Hệ thống Upload Ảnh
+
+Phiên bản này đã thay đổi cách lưu ảnh: file nhị phân được lưu ngoài thư mục `public` (để giữ an toàn và khả năng kiểm soát), dưới `storage/uploads-images`. Ảnh được phục vụ qua API: `/api/uploads-images/[filename]`.
 
 ### 1) Công nghệ chính
+
 - Next.js 16 (App Router)
 - React 19, TypeScript
 - Redis (lưu metadata ảnh và user)
@@ -8,99 +11,111 @@
 - Sharp (tùy chọn) để resize ảnh phía server
 
 ### 2) Yêu cầu môi trường
+
 - Node.js >= 18
 - Redis server đang chạy và cho phép kết nối từ ứng dụng
 - Biến môi trường tùy chọn:
   - `JWT_SECRET` – nếu không đặt, giá trị mặc định là `your-secret-key`
 
-Redis connection được cấu hình tại `src/lib/redis.ts` (sử dụng URL/password cố định). Điều chỉnh file này nếu môi trường của bạn khác.
+Redis connection được cấu hình tại `src/lib/redis.ts`. Điều chỉnh file này nếu môi trường của bạn khác.
 
 ### 3) Cài đặt và chạy
+
 ```bash
 cd web
-npm i
-# (Khuyến nghị) cài sharp để dùng tính năng resize ảnh
-npm i sharp
+npm install
+# (Tùy chọn) cài sharp để dùng tính năng resize ảnh
+npm install sharp
 
 npm run dev
 # Truy cập: http://localhost:3000
 ```
 
-Tài khoản admin mặc định sẽ được seed tự động khi kết nối Redis thành công:
+Tài khoản admin mặc định (seed khi lần đầu kết nối Redis):
+
 - Email: `mana@gmail.com`
 - Mật khẩu: `123456`
 
-### 4) Phân quyền và chức năng
-- User:
-  - Đăng ký/Đăng nhập (JWT lưu LocalStorage trên client)
-  - Upload ảnh: chỉ 1 file/lần, định dạng cho phép: PNG, JPG/JPEG, SVG
-  - Xem danh sách ảnh đã upload của chính mình, tìm theo tên, lọc theo ngày, phân trang, Share link, Xóa
-- Admin:
-  - Quản lý người dùng: Thêm/Sửa/Xóa (hiện popup xác nhận xóa, cập nhật trực tiếp vào Redis)
-  - Quản lý ảnh (toàn hệ thống): xem, lọc, sửa metadata, chuyển ảnh giữa users, xóa, resize ảnh
-  - Upload nhiều ảnh/lần (multi-upload) – review dạng danh sách: Tên ảnh + URL + nút Copy
+### 4) Thiết kế lưu trữ ảnh (quan trọng)
 
-Lưu ý: Hệ thống đã loại bỏ “gói dung lượng/quota quản trị”; chỉ còn giới hạn dung lượng theo người dùng (mặc định 1GB) phục vụ kiểm tra tại API upload.
+- File nhị phân ảnh được lưu tại: `storage/uploads-images/<uuid>.<ext>` (không còn lưu trực tiếp trong `public`).
+- Ảnh được truy cập công khai thông qua API: `GET /api/uploads-images/<filename>` (route đã được thêm). Route này trả nội dung ảnh với header Content-Type, Content-Length và Cache-Control phù hợp.
+- Metadata ảnh vẫn lưu trong Redis (LIST `images:{email}`), trường `url` trong metadata có thể là:
+  - `/api/uploads-images/<filename>` (mới, khuyến nghị)
+  - legacy `/uploads/<filename>` hoặc `/uploads-images/<filename>` (vẫn được hỗ trợ bởi resolver nội bộ để xóa/resize)
 
-### 5) Lưu trữ dữ liệu trên Redis
-- Danh sách người dùng: LIST `user_list`
-  - Mỗi phần tử là JSON đầy đủ của user: `{ id, email, password, role, createdAt, storageMb? }`
-- Danh sách ảnh theo user: LIST `images:{email}`
-  - Mỗi phần tử là metadata ảnh: `{ id, userId, originalName, fileName, url, size, type, uploadedAt }`
-- Các key legacy cũ (`user:${email}`, `user:id:${id}`, `userlist`, `images` object cũ, `user_images:*`, `images:*:*`) đã được dọn tự động sau khi kết nối Redis.
+Lý do: lưu ngoài `public` cho phép kiểm soát auth/transform trước khi trả file (giống Cloudinary self-hosted).
 
-### 6) API chính
+### 5) API chính
+
 Tất cả endpoint trả JSON. Yêu cầu header `Authorization: Bearer <token>` trừ các endpoint auth.
 
 - Auth
-  - `POST /api/auth/register` – đăng ký user, push user đầy đủ vào `user_list`
-  - `POST /api/auth/login` – đăng nhập, trả về `token` và thông tin user rút gọn
+
+  - `POST /api/auth/register` – đăng ký user
+  - `POST /api/auth/login` – đăng nhập, trả token
 
 - Upload & Ảnh của user
-  - `POST /api/upload`
-    - User: chỉ 1 ảnh; Admin: nhiều ảnh (`files`)
+
+  - `POST /api/upload` – upload file(s)
+    - User thường upload 1 file; Admin có thể upload nhiều file.
     - Định dạng: png, jpg/jpeg, svg
-    - Kiểm tra dung lượng đã dùng từ `images:{email}` so với `storageMb` (mặc định 1024MB)
-  - `GET /api/images?page=&limit=` – trả danh sách theo phân trang từ `images:{email}`
-  - `DELETE /api/images?id=` – xóa 1 ảnh của chính user, đồng thời xóa file trong `public/`
+    - Sau upload, server lưu file vào `storage/uploads-images` và trả `url` dưới dạng `/api/uploads-images/<filename>`.
+  - `GET /api/images?page=&limit=` – danh sách ảnh của user (từ Redis key `images:{email}`)
+  - `DELETE /api/images?id=` – xóa 1 ảnh của chính user (metadata + file trên storage)
+
+- Image serving (mới)
+
+  - `GET /api/uploads-images/[filename]` – trả file ảnh từ `storage/uploads-images` (Content-Type, Cache-Control set sẵn).
 
 - Admin Users
-  - `GET /api/admin/users` – đọc toàn bộ `user_list` (ẩn password khi render UI)
-  - `POST /api/admin/users` – tạo user mới, lPush vào `user_list`
-  - `PUT /api/admin/users/[id]?email=<email_cũ>` – cập nhật user trong `user_list` (tìm theo id, hoặc theo `email` cũ nếu có; chặn trùng email)
-  - `DELETE /api/admin/users/[id]?email=<email>` – xóa user khỏi `user_list` và toàn bộ ảnh `images:{email}`
+
+  - `GET /api/admin/users`, `POST /api/admin/users`, `PUT /api/admin/users/[id]`, `DELETE /api/admin/users/[id]` — tương tự như trước, nhưng xóa user giờ sẽ xóa ảnh từ `storage/uploads-images`.
 
 - Admin Images
-  - `GET /api/admin/images?page=&limit=` – duyệt tất cả `images:*` và tổng hợp trả về
-  - `PUT /api/admin/images/[id]` – chỉnh sửa metadata/chuyển owner (lookup email đích từ `user_list`)
-  - `DELETE /api/admin/images/[id]` – xóa ảnh (metadata + file)
-  - `POST /api/admin/images/[id]/resize` – resize bằng Sharp (jpg/png), không áp dụng cho SVG
+  - `GET /api/admin/images` – duyệt tất cả `images:*`
+  - `PUT /api/admin/images/[id]` – chỉnh metadata / chuyển owner
+  - `DELETE /api/admin/images/[id]` – xóa metadata + file (từ storage)
+  - `POST /api/admin/images/[id]/resize` – resize ảnh (sử dụng sharp), hoạt động trên file trong `storage` (không còn phụ thuộc vào `public`)
 
-### 7) UI – các trang chính
-- `/login`, `/register` – xác thực
-- `/upload` – form upload; admin hỗ trợ chọn nhiều file; review theo yêu cầu
-- `/dashboard/images` – lưới 2x5, lọc ngày, tìm tên, phân trang, share, xóa; thanh công cụ trên 1 hàng và có cuộn
-- `/admin/users` – bảng người dùng; thêm/sửa/xóa, popup xác nhận xóa
-- `/admin/images` – quản lý ảnh toàn hệ thống; xem/share/resize/chỉnh sửa/xóa; tooltip khi hover
+### 6) Dữ liệu trên Redis
 
-### 8) Lưu file ảnh
-Ảnh lưu tại `public/uploads/<uuid>.<ext>`. URL trả về dạng `/uploads/<uuid>.<ext>`; nút Share sẽ copy `window.location.origin + url`.
+- `user_list`: LIST các user (mỗi phần tử JSON `{ id, email, password, role, createdAt, storageMb? }`).
+- `images:{email}`: LIST metadata ảnh: `{ id, userId, originalName, fileName, url, size, type, uploadedAt }`.
+- Lưu ý: metadata cũ có thể chứa URL dạng `/uploads/...`; dự án có helper `resolveImageFilePathFromUrl` để hỗ trợ ánh xạ các dạng URL legacy sang `storage` nên không bắt buộc phải cập nhật metadata ngay.
 
-### 9) Ghi chú triển khai
-- Production: bật biến môi trường `JWT_SECRET` mạnh
-- Phân quyền: mọi endpoint admin kiểm tra `decoded.role === 'admin'`
-- Resize cần `sharp`; nếu không cài, endpoint resize sẽ lỗi import
-- Kiến trúc Redis theo List giúp quản lý/truy xuất nhanh (LLEN/LRANGE); các thao tác cập nhật ghi lại toàn bộ list để đảm bảo tính nhất quán
+### 7) Kiểm tra & lint
 
-### 10) Lệnh nhanh
+- TypeScript: `npx tsc --noEmit`
+- ESLint: `npm run lint`
+- Chạy dev: `npm run dev`
+
+Nếu muốn chuẩn hoá metadata (chuyển tất cả `url` sang `/api/uploads-images/<filename>`), tôi có thể cung cấp script update Redis an toàn — báo tôi nếu muốn thực hiện.
+
+### 8) Lưu ý vận hành
+
+- Bật `JWT_SECRET` mạnh trong production.
+- `sharp` là optional dependency; nếu không cài, các route resize sẽ lỗi.
+- Việc chuyển file ra khỏi `public` giúp kiểm soát truy cập và áp dụng caching/transform khi phát hành.
+
+### 9) Lệnh nhanh
+
 ```bash
 # Phát triển
 npm run dev
+
+# Lint/typecheck
+npm run lint
+npx tsc --noEmit
 
 # Build & start
 npm run build
 npm start
 ```
 
-### 11) Hỗ trợ
-Nếu gặp lỗi về Redis key cũ, hãy kiểm tra log “Redis cleanup done” khi app khởi chạy; hoặc dọn thủ công các key legacy đã nêu ở mục 5.
+### 10) Hỗ trợ
+
+Nếu gặp lỗi liên quan Redis keys cũ, xem log khi khởi động (có dòng "Redis cleanup" nếu ứng dụng dọn legacy keys). Nếu cần, tôi có thể:
+
+- Viết script chuẩn hoá metadata trong Redis (chuyển URL → `/api/uploads-images/...`).
+- Thêm route redirect legacy `/uploads/<file>` → `/api/uploads-images/<file>` nếu bạn muốn giữ các đường link public cũ.

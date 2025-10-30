@@ -11,6 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { Edit, Trash2, Search, Upload, Calendar, User, ImageIcon, Maximize2, Eye, Link as LinkIcon } from "lucide-react";
+import { buildImageUrlFromFileName } from "@/lib/images";
+import { copyToClipboard } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 interface ImageMetadata {
@@ -402,7 +404,7 @@ export default function AdminImageManagementPage() {
                                                             <Card className="overflow-hidden hover:shadow-lg transition-shadow flex flex-col gap-2 min-h-0 p-0 h-full">
                                                                 <div className="flex-1 relative flex items-center justify-center min-h-0 h-[250px] bg-zinc-100 overflow-hidden">
                                                                     <img
-                                                                        src={image.url}
+                                                                        src={buildImageUrlFromFileName(image.fileName)}
                                                                         alt={image.originalName}
                                                                         className="w-full h-full object-cover object-center"
                                                                     />
@@ -428,7 +430,7 @@ export default function AdminImageManagementPage() {
                                                                     <div className="flex gap-2 p-3 justify-center">
                                                                         <Tooltip>
                                                                             <TooltipTrigger asChild>
-                                                                                <Button size="sm" variant="secondary" onClick={() => window.open(image.url, '_blank')}>
+                                                                                <Button size="sm" variant="secondary" onClick={() => window.open(buildImageUrlFromFileName(image.fileName), '_blank')}>
                                                                                     <Eye className="h-4 w-4" />
                                                                                 </Button>
                                                                             </TooltipTrigger>
@@ -436,7 +438,7 @@ export default function AdminImageManagementPage() {
                                                                         </Tooltip>
                                                                         <Tooltip>
                                                                             <TooltipTrigger asChild>
-                                                                                <Button size="sm" variant="outline" onClick={() => { const full = (typeof window !== 'undefined' ? window.location.origin : '') + image.url; navigator.clipboard.writeText(full); toast.success('Đã copy link ảnh'); }}>
+                                                                                <Button size="sm" variant="outline" onClick={async () => { const url = buildImageUrlFromFileName(image.fileName); const full = (typeof window !== 'undefined' ? window.location.origin : '') + url; await copyToClipboard(full); toast.success('Đã copy link ảnh'); }}>
                                                                                     <LinkIcon className="h-4 w-4" />
                                                                                 </Button>
                                                                             </TooltipTrigger>

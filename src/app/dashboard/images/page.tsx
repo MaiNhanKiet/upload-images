@@ -6,11 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Search, ImageIcon, Calendar, Trash2 } from "lucide-react";
+import { Search, ImageIcon, Calendar, Trash2, Eye, Link as LinkIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { buildImageUrlFromFileName } from "@/lib/images";
+import { copyToClipboard } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface ImageMetadata {
     id: string;
@@ -193,7 +196,7 @@ export default function UserImagesPage() {
                                                 <div key={image.id} className="group relative flex flex-col min-h-0 h-full">
                                                     <Card className="overflow-hidden hover:shadow-lg transition-shadow flex flex-col gap-2 min-h-0 p-0 h-full">
                                                         <div className="flex-1 relative flex items-center justify-center min-h-0 h-[250px] bg-zinc-100 overflow-hidden">
-                                                            <img src={image.url} alt={image.originalName} className="w-full h-full object-cover object-center" />
+                                                            <img src={buildImageUrlFromFileName(image.fileName)} alt={image.originalName} className="w-full h-full object-cover object-center" />
                                                         </div>
                                                         <div className="px-4 shrink-0">
                                                             <h3 className="font-medium text-sm truncate" title={image.originalName}>{image.originalName}</h3>
@@ -207,19 +210,25 @@ export default function UserImagesPage() {
                                                             <div className="flex gap-2 p-3 justify-center">
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
-                                                                        <Button size="sm" variant="secondary" onClick={() => window.open(image.url, '_blank')}>Xem</Button>
+                                                                        <Button size="sm" variant="secondary" onClick={() => window.open(buildImageUrlFromFileName(image.fileName), '_blank')}>
+                                                                            <Eye className="h-4 w-4" />
+                                                                        </Button>
                                                                     </TooltipTrigger>
                                                                     <TooltipContent>Xem ảnh</TooltipContent>
                                                                 </Tooltip>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
-                                                                        <Button size="sm" variant="outline" onClick={() => { const full = (typeof window !== 'undefined' ? window.location.origin : '') + image.url; navigator.clipboard.writeText(full); }}>Share</Button>
+                                                                        <Button size="sm" variant="outline" onClick={async () => { const url = buildImageUrlFromFileName(image.fileName); const full = (typeof window !== 'undefined' ? window.location.origin : '') + url; await copyToClipboard(full); toast.success('Đã copy URL!'); }}>
+                                                                            <LinkIcon className="h-4 w-4" />
+                                                                        </Button>
                                                                     </TooltipTrigger>
                                                                     <TooltipContent>Copy link</TooltipContent>
                                                                 </Tooltip>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
-                                                                        <Button size="sm" variant="destructive" onClick={() => setConfirmDeleteId(image.id)}>Xóa</Button>
+                                                                        <Button size="sm" variant="destructive" onClick={() => setConfirmDeleteId(image.id)}>
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
                                                                     </TooltipTrigger>
                                                                     <TooltipContent>Xóa</TooltipContent>
                                                                 </Tooltip>
